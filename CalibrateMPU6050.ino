@@ -2,9 +2,24 @@
 #include "I2Cdev.h"
 #include "MPU6050.h"
 
+
+#define BAUD 115200
+
+/* If your sensor's VCC is hooked to a GPIO pin define it here */
+#define VCC_PIN GPIO_NUM_5
+
+
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     #include "Wire.h"
 #endif
+
+#ifdef ESP32
+// I2C pins
+#define SDA_PIN GPIO_NUM_18
+#define SCL_PIN GPIO_NUM_19
+#endif // ESP32
+// I2C bus speed in KHz 100 - 400
+#define WIRE_SPEED 400
 
 #define HIST_SIZE 200
 
@@ -31,28 +46,54 @@ int timestep = 0;
 
 #define OUTPUT_READABLE_ACCELGYRO
 
-#define LED_PIN 13
+//#define LED_PIN 13
 bool blinkState = false;
 
 void setup() {
-    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+#  ifdef ESP32
+        Wire.begin( SDA_PIN, SCL_PIN, WIRE_SPEED * 1000);
+#  else // ESP32
         Wire.begin();
-    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-        Fastwire::setup(400, true);
-    #endif
+#  endif // ESP32
+#elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+        Fastwire::setup( WIRE_SPEED, true);
+#endif
 
-    Serial.begin(38400);
+    Serial.begin( BAUD);
     delay(5000);
+
+#ifdef VCC_PIN    // MPUs VCC pin hooked to IO pin?  powercycle it!
+    pinMode( VCC_PIN, OUTPUT);
+    digitalWrite( VCC_PIN, LOW);
+    delay( 100);
+    digitalWrite( VCC_PIN, HIGH);
+    delay( 100);
+#endif // VCC
+    
+    accelgyro.reset();
     Serial.println("Initializing I2C devices...");
     accelgyro.initialize();
     accelgyro.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
     accelgyro.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
 
     Serial.println("Testing device connections...");
-    Serial.println(accelgyro.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
+    if( accelgyro.testConnection() )
+    {
+      Serial.println("MPU6050 connection successful");
+    }
+    else
+    {
+      Serial.println("MPU6050 connection failed");
+      // no need to continue
+      while( true )
+        ;
+    }
 
+#ifdef LED_PIN
     // configure Arduino LED for
     pinMode(LED_PIN, OUTPUT);
+#endif LED_PIN
 }
 
 void loop() {
@@ -77,7 +118,9 @@ void loop() {
     if (millis() - since < 180000) {
         printData();
         blinkState = !blinkState;
+#ifdef LED_PIN
         digitalWrite(LED_PIN, blinkState);
+#endif LED_PIN
         delay(1000);
         return;
     }
@@ -101,7 +144,9 @@ void loop() {
     printData();
     // blink LED to indicate activity
     blinkState = !blinkState;
+#ifdef LED_PIN
     digitalWrite(LED_PIN, blinkState);    
+#endif LED_PIN
     timestep++;
     if (timestep >= HIST_SIZE) {
         timestep = 0;
@@ -112,31 +157,35 @@ void loop() {
 void printData()
 {
     Serial.print("temp: ");
-    Serial.print(sensor_temperature); Serial.print("\t");
-    Serial.print("a/g:\t");
+    Serial.print(sensor_temperature);
+    Serial.print("\ta/g:\t");
     Serial.print(ax); Serial.print("\t");
     Serial.print(ay); Serial.print("\t");
     Serial.print(az); Serial.print("\t");
     Serial.print(gx); Serial.print("\t");
     Serial.print(gy); Serial.print("\t");
     Serial.print(gz); Serial.print("\t");
+    Serial.print("\toffset:\t");
     Serial.print(off_ax); Serial.print("\t");
     Serial.print(off_ay); Serial.print("\t");
     Serial.print(off_az); Serial.print("\t");
     Serial.print(off_gx); Serial.print("\t");
     Serial.print(off_gy); Serial.print("\t");
     Serial.print(off_gz); Serial.print("\t");
+    Serial.print("\tmean:\t");
     Serial.print(mean(aax, HIST_SIZE)); Serial.print("\t");
     Serial.print(mean(aay, HIST_SIZE)); Serial.print("\t");
     Serial.print(mean(aaz, HIST_SIZE)); Serial.print("\t");
     Serial.print(mean(agx, HIST_SIZE)); Serial.print("\t");
     Serial.print(mean(agy, HIST_SIZE)); Serial.print("\t");
     Serial.print(mean(agz, HIST_SIZE)); Serial.print("\t");
+    Serial.print("\tstddev:\t");
     Serial.print(stddev(aax, HIST_SIZE)); Serial.print("\t");
     Serial.print(stddev(aay, HIST_SIZE)); Serial.print("\t");
     Serial.print(stddev(aaz, HIST_SIZE)); Serial.print("\t");
     Serial.print(stddev(agx, HIST_SIZE)); Serial.print("\t");
     Serial.print(stddev(agy, HIST_SIZE)); Serial.print("\t");
     Serial.print(stddev(agz, HIST_SIZE));
-    Serial.println("");
+    Serial.println();
 }
+
